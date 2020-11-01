@@ -3,6 +3,8 @@
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$CURDIR"/../shell_config.sh
 
+CLICKHOUSE_CLIENT=$(echo ${CLICKHOUSE_CLIENT} | sed 's/'"--send_logs_level=${CLICKHOUSE_CLIENT_SERVER_LOGS_LEVEL}"'/--send_logs_level=error/g')
+
 $CLICKHOUSE_CLIENT -q "DROP DATABASE IF EXISTS test_01114_1"
 $CLICKHOUSE_CLIENT -q "DROP DATABASE IF EXISTS test_01114_2"
 $CLICKHOUSE_CLIENT -q "DROP DATABASE IF EXISTS test_01114_3"

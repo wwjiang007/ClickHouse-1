@@ -392,8 +392,9 @@ void DatabaseAtomic::tryCreateSymlink(const String & table_name, const String & 
     try
     {
         String link = path_to_table_symlinks + escapeForFileName(table_name);
-        String data = Poco::Path(global_context.getPath()).makeAbsolute().toString() + actual_data_path;
-        Poco::File{data}.linkTo(link, Poco::File::LINK_SYMBOLIC);
+        Poco::File data = Poco::Path(global_context.getPath()).makeAbsolute().toString() + actual_data_path;
+        if (data.exists())
+            data.linkTo(link, Poco::File::LINK_SYMBOLIC);
     }
     catch (...)
     {
@@ -405,8 +406,9 @@ void DatabaseAtomic::tryRemoveSymlink(const String & table_name)
 {
     try
     {
-        String path = path_to_table_symlinks + escapeForFileName(table_name);
-        Poco::File{path}.remove();
+        Poco::File data_symlink{path_to_table_symlinks + escapeForFileName(table_name)};
+        if (data_symlink.exists())
+            data_symlink.remove();
     }
     catch (...)
     {
