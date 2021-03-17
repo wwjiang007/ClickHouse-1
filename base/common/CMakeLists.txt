@@ -6,6 +6,7 @@ set (SRCS
     demangle.cpp
     getFQDNOrHostName.cpp
     getMemoryAmount.cpp
+    getPageSize.cpp
     getThreadId.cpp
     JSON.cpp
     LineReader.cpp
@@ -73,7 +74,6 @@ target_link_libraries (common
         ${CITYHASH_LIBRARIES}
         boost::headers_only
         boost::system
-        FastMemcpy
         Poco::Net
         Poco::Net::SSL
         Poco::Util

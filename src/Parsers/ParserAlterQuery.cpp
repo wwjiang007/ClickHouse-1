@@ -11,7 +11,6 @@
 #include <Parsers/ASTIndexDeclaration.h>
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTLiteral.h>
-#include <Parsers/ASTAssignment.h>
 #include <Parsers/parseDatabaseAndTableName.h>
 
 
@@ -631,7 +630,7 @@ bool ParserAlterCommand::parseImpl(Pos & pos, ASTPtr & node, Expected & expected
 
 bool ParserAlterCommandList::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 {
-    auto command_list = std::make_shared<ASTAlterCommandList>();
+    auto command_list = std::make_shared<ASTExpressionList>();
     node = command_list;
 
     ParserToken s_comma(TokenType::Comma);
@@ -643,37 +642,9 @@ bool ParserAlterCommandList::parseImpl(Pos & pos, ASTPtr & node, Expected & expe
         if (!p_command.parse(pos, command, expected))
             return false;
 
-        command_list->add(command);
+        command_list->children.push_back(command);
     }
     while (s_comma.ignore(pos, expected));
-
-    return true;
-}
-
-
-bool ParserAssignment::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
-{
-    auto assignment = std::make_shared<ASTAssignment>();
-    node = assignment;
-
-    ParserIdentifier p_identifier;
-    ParserToken s_equals(TokenType::Equals);
-    ParserExpression p_expression;
-
-    ASTPtr column;
-    if (!p_identifier.parse(pos, column, expected))
-        return false;
-
-    if (!s_equals.ignore(pos, expected))
-        return false;
-
-    ASTPtr expression;
-    if (!p_expression.parse(pos, expression, expected))
-        return false;
-
-    tryGetIdentifierNameInto(column, assignment->column_name);
-    if (expression)
-        assignment->children.push_back(expression);
 
     return true;
 }

@@ -31,10 +31,6 @@
 #include <grpc++/server_builder.h>
 
 
-/// For diagnosing problems use the following environment variables:
-/// export GRPC_TRACE=all
-/// export GRPC_VERBOSITY=DEBUG
-
 using GRPCService = clickhouse::grpc::ClickHouse::AsyncService;
 using GRPCQueryInfo = clickhouse::grpc::QueryInfo;
 using GRPCResult = clickhouse::grpc::Result;
@@ -57,6 +53,39 @@ namespace ErrorCodes
 
 namespace
 {
+    /// Make grpc to pass logging messages to ClickHouse logging system.
+    void initGRPCLogging(const Poco::Util::AbstractConfiguration & config)
+    {
+        static std::once_flag once_flag;
+        std::call_once(once_flag, [&config]
+        {
+            static Poco::Logger * logger = &Poco::Logger::get("grpc");
+            gpr_set_log_function([](gpr_log_func_args* args)
+            {
+                if (args->severity == GPR_LOG_SEVERITY_DEBUG)
+                    LOG_DEBUG(logger, "{} ({}:{})", args->message, args->file, args->line);
+                else if (args->severity == GPR_LOG_SEVERITY_INFO)
+                    LOG_INFO(logger, "{} ({}:{})", args->message, args->file, args->line);
+                else if (args->severity == GPR_LOG_SEVERITY_ERROR)
+                    LOG_ERROR(logger, "{} ({}:{})", args->message, args->file, args->line);
+            });
+
+            if (config.getBool("grpc.verbose_logs", false))
+            {
+                gpr_set_log_verbosity(GPR_LOG_SEVERITY_DEBUG);
+                grpc_tracer_set_enabled("all", true);
+            }
+            else if (logger->is(Poco::Message::PRIO_DEBUG))
+            {
+                gpr_set_log_verbosity(GPR_LOG_SEVERITY_DEBUG);
+            }
+            else if (logger->is(Poco::Message::PRIO_INFORMATION))
+            {
+                gpr_set_log_verbosity(GPR_LOG_SEVERITY_INFO);
+            }
+        });
+    }
+
     grpc_compression_algorithm parseCompressionAlgorithm(const String & str)
     {
         if (str == "none")
@@ -623,7 +652,6 @@ namespace
 
         /// Create context.
         query_context.emplace(iserver.context());
-        query_scope.emplace(*query_context);
 
         /// Authentication.
         query_context->setUser(user, password, user_address);
@@ -640,6 +668,8 @@ namespace
             query_context = session->context;
             query_context->setSessionContext(session->context);
         }
+
+        query_scope.emplace(*query_context);
 
         /// Set client info.
         ClientInfo & client_info = query_context->getClientInfo();
@@ -753,8 +783,6 @@ namespace
         if (!io.out)
             return;
 
-        initializeBlockInputStream(io.out->getHeader());
-
         bool has_data_to_insert = (insert_query && insert_query->data)
                                   || !query_info.input_data().empty() || query_info.next_query_info();
         if (!has_data_to_insert)
@@ -764,6 +792,10 @@ namespace
             else
                 throw Exception("No data to insert", ErrorCodes::NO_DATA_TO_INSERT);
         }
+
+        /// This is significant, because parallel parsing may be used.
+        /// So we mustn't touch the input stream from other thread.
+        initializeBlockInputStream(io.out->getHeader());
 
         block_input_stream->readPrefix();
         io.out->writePrefix();
@@ -965,7 +997,7 @@ namespace
 
         AsynchronousBlockInputStream async_in(io.in);
         write_buffer.emplace(*result.mutable_output());
-        block_output_stream = query_context->getOutputFormat(output_format, *write_buffer, async_in.getHeader());
+        block_output_stream = query_context->getOutputStream(output_format, *write_buffer, async_in.getHeader());
         Stopwatch after_send_progress;
 
         /// Unless the input() function is used we are not going to receive input data anymore.
@@ -1037,7 +1069,7 @@ namespace
 
         auto executor = std::make_shared<PullingAsyncPipelineExecutor>(io.pipeline);
         write_buffer.emplace(*result.mutable_output());
-        block_output_stream = query_context->getOutputFormat(output_format, *write_buffer, executor->getHeader());
+        block_output_stream = query_context->getOutputStream(output_format, *write_buffer, executor->getHeader());
         block_output_stream->writePrefix();
         Stopwatch after_send_progress;
 
@@ -1292,7 +1324,7 @@ namespace
             return;
 
         WriteBufferFromString buf{*result.mutable_totals()};
-        auto stream = query_context->getOutputFormat(output_format, buf, totals);
+        auto stream = query_context->getOutputStream(output_format, buf, totals);
         stream->writePrefix();
         stream->write(totals);
         stream->writeSuffix();
@@ -1304,7 +1336,7 @@ namespace
             return;
 
         WriteBufferFromString buf{*result.mutable_extremes()};
-        auto stream = query_context->getOutputFormat(output_format, buf, extremes);
+        auto stream = query_context->getOutputStream(output_format, buf, extremes);
         stream->writePrefix();
         stream->write(extremes);
         stream->writeSuffix();
@@ -1584,7 +1616,10 @@ private:
 
 
 GRPCServer::GRPCServer(IServer & iserver_, const Poco::Net::SocketAddress & address_to_listen_)
-    : iserver(iserver_), address_to_listen(address_to_listen_), log(&Poco::Logger::get("GRPCServer"))
+    : iserver(iserver_)
+    , address_to_listen(address_to_listen_)
+    , log(&Poco::Logger::get("GRPCServer"))
+    , runner(std::make_unique<Runner>(*this))
 {}
 
 GRPCServer::~GRPCServer()
@@ -1604,6 +1639,7 @@ GRPCServer::~GRPCServer()
 
 void GRPCServer::start()
 {
+    initGRPCLogging(iserver.config());
     grpc::ServerBuilder builder;
     builder.AddListeningPort(address_to_listen.toString(), makeCredentials(iserver.config()));
     builder.RegisterService(&grpc_service);
@@ -1614,7 +1650,6 @@ void GRPCServer::start()
 
     queue = builder.AddCompletionQueue();
     grpc_server = builder.BuildAndStart();
-    runner = std::make_unique<Runner>(*this);
     runner->start();
 }
 

@@ -31,6 +31,12 @@
     M(Float32) \
     M(Float64)
 
+#define FOR_DECIMAL_TYPES(M) \
+    M(Decimal32) \
+    M(Decimal64) \
+    M(Decimal128)
+
+
 namespace DB
 {
 
@@ -135,6 +141,8 @@ static IAggregateFunction * createWithDecimalType(const IDataType & argument_typ
     if (which.idx == TypeIndex::Decimal64) return new AggregateFunctionTemplate<Decimal64>(std::forward<TArgs>(args)...);
     if (which.idx == TypeIndex::Decimal128) return new AggregateFunctionTemplate<Decimal128>(std::forward<TArgs>(args)...);
     if (which.idx == TypeIndex::Decimal256) return new AggregateFunctionTemplate<Decimal256>(std::forward<TArgs>(args)...);
+    if constexpr (AggregateFunctionTemplate<DateTime64>::DateTime64Supported)
+        if (which.idx == TypeIndex::DateTime64) return new AggregateFunctionTemplate<DateTime64>(std::forward<TArgs>(args)...);
     return nullptr;
 }
 
@@ -146,6 +154,8 @@ static IAggregateFunction * createWithDecimalType(const IDataType & argument_typ
     if (which.idx == TypeIndex::Decimal64) return new AggregateFunctionTemplate<Decimal64, Data>(std::forward<TArgs>(args)...);
     if (which.idx == TypeIndex::Decimal128) return new AggregateFunctionTemplate<Decimal128, Data>(std::forward<TArgs>(args)...);
     if (which.idx == TypeIndex::Decimal256) return new AggregateFunctionTemplate<Decimal256, Data>(std::forward<TArgs>(args)...);
+    if constexpr (AggregateFunctionTemplate<DateTime64, Data>::DateTime64Supported)
+        if (which.idx == TypeIndex::DateTime64) return new AggregateFunctionTemplate<DateTime64, Data>(std::forward<TArgs>(args)...);
     return nullptr;
 }
 
